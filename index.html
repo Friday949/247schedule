@@ -28,7 +28,7 @@
   .ev { flex:1 1 0; min-height:0; max-height:4.4vh; margin-top:0.3vh; padding:0 0.4vw; border-radius:4px;
     color:#101317; font-weight:700; font-size:3.5vh; line-height:1; display:flex; align-items:center;
     white-space:nowrap; overflow:hidden; }
-  .ev small { font-size:68%; font-weight:500; opacity:0.8; margin-right:0.5em; letter-spacing:0.02em; }
+  .ev small { display:inline-block; width:5.6em; font-size:62%; font-weight:500; opacity:0.8; letter-spacing:0.02em; }
   .ev span { flex:none; white-space:nowrap; }
   .hol { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
     color:var(--dim); font-weight:700; font-size:3vh; line-height:1.15; border:0.3vh dashed #3a424e; border-radius:4px; margin-top:0.3vh; }
@@ -234,14 +234,24 @@ function render() {
   fitText();
 }
 
-// Shrinks long entries so they fit on one line (never below 55% of normal size)
+// Shrinks long entries so they fit on one line (never below 55% of normal size).
+// Every entry in a day shrinks by the same amount so the names stay lined up.
 function fitText() {
-  var els = document.getElementById("grid").getElementsByClassName("ev"), i;
-  for (i = 0; i < els.length; i++) {
-    var el = els[i], span = el.firstChild; el.style.fontSize = ""; var cs = window.getComputedStyle(el);
-    var size = parseFloat(cs.fontSize), min = size * 0.55;
-    var avail = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-    while (span.offsetWidth > avail && size > min) { size -= 0.5; el.style.fontSize = size + "px"; }
+  var days = document.getElementById("grid").getElementsByClassName("day"), d, i;
+  for (d = 0; d < days.length; d++) {
+    var els = days[d].getElementsByClassName("ev"), best = 0;
+    if (!els.length) continue;
+    for (i = 0; i < els.length; i++) els[i].style.fontSize = "";
+    var cs = window.getComputedStyle(els[0]), base = parseFloat(cs.fontSize);
+    best = base;
+    for (i = 0; i < els.length; i++) {
+      var el = els[i], span = el.firstChild, size = base;
+      var avail = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      el.style.fontSize = size + "px";
+      while (span.offsetWidth > avail && size > base * 0.55) { size -= 0.5; el.style.fontSize = size + "px"; }
+      if (size < best) best = size;
+    }
+    for (i = 0; i < els.length; i++) els[i].style.fontSize = best + "px";
   }
 }
 window.onresize = fitText;
