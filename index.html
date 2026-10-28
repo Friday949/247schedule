@@ -26,8 +26,9 @@
   .num { font-size:2.8vh; font-weight:700; color:var(--dim); line-height:1; margin-bottom:0.3vh; }
   .today .num { color:var(--today); }
   .ev { flex:1 1 0; min-height:0; max-height:4.4vh; margin-top:0.3vh; padding:0 0.4vw; border-radius:4px;
-    color:#101317; font-weight:700; font-size:2.9vh; line-height:1; display:flex; align-items:center;
+    color:#101317; font-weight:700; font-size:3.5vh; line-height:1; display:flex; align-items:center;
     white-space:nowrap; overflow:hidden; }
+  .ev small { font-size:68%; font-weight:500; opacity:0.8; margin-right:0.5em; letter-spacing:0.02em; }
   .ev span { flex:none; white-space:nowrap; }
   .hol { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
     color:var(--dim); font-weight:700; font-size:3vh; line-height:1.15; border:0.3vh dashed #3a424e; border-radius:4px; margin-top:0.3vh; }
@@ -221,10 +222,8 @@ function render() {
       });
       var j;
       for (j = 0; j < list.length; j++) {
-        var parts = [esc(pressTag(list[j].press))];
-        if (list[j].shift) parts.push(esc(fmtShift(list[j].shift)));
-        parts.push(esc(list[j].staff));
-        html += '<div class="ev" style="background:' + colorFor(list[j].press) + '"><span>' + parts.join("&nbsp;-&nbsp;") + "</span></div>";
+        var tag = esc(pressTag(list[j].press)) + (list[j].shift ? "&nbsp;" + esc(fmtShift(list[j].shift)) : "");
+        html += '<div class="ev" style="background:' + colorFor(list[j].press) + '"><span><small>' + tag + "</small>" + esc(list[j].staff) + "</span></div>";
       }
       html += "</div>";
     }
