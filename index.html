@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>24/7 Press Staffing</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#14171c; --cell:#1e232b; --wknd:#191d24; --text:#f2f4f7; --dim:#8a93a0; --today:#ffffff; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text); overflow:hidden;
+    font-family:"Barlow Condensed","Arial Narrow",Arial,sans-serif; }
+  #app { height:100%; display:flex; flex-direction:column; padding:2.2vh 2vw; }
+  #top { display:flex; align-items:center; justify-content:space-between; height:6.4vh; padding:0 0.5vw; margin-bottom:1.6vh; }
+  #title { font-size:4.9vh; font-weight:700; letter-spacing:0.02em; }
+  #legend { display:flex; gap:1.2vw; }
+  .key { display:flex; align-items:center; font-size:3vh; font-weight:500; }
+  .key i { display:inline-block; width:2.6vh; height:2.6vh; margin-right:0.5vw; border-radius:3px; }
+  #grid { flex:1; display:grid; grid-template-columns:repeat(7,1fr); gap:0.5vh 0.3vw; min-height:0; }
+  .dow { font-size:2.8vh; font-weight:700; color:var(--dim); padding:0 0.5vw; }
+  .day { background:var(--cell); border-radius:6px; padding:0.5vh 0.3vw; min-height:0; overflow:hidden;
+    display:flex; flex-direction:column; }
+  .day.wknd { background:var(--wknd); }
+  .day.past { opacity:0.45; }
+  .day.today { outline:0.5vh solid var(--today); outline-offset:-0.5vh; }
+  .num { font-size:2.8vh; font-weight:700; color:var(--dim); line-height:1; margin-bottom:0.3vh; }
+  .today .num { color:var(--today); }
+  .ev { flex:1 1 0; min-height:0; max-height:4.4vh; margin-top:0.3vh; padding:0 0.4vw; border-radius:4px;
+    color:#101317; font-weight:700; font-size:2.9vh; line-height:1; display:flex; align-items:center;
+    white-space:nowrap; overflow:hidden; }
+  .ev span { flex:none; white-space:nowrap; }
+  .hol { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
+    color:var(--dim); font-weight:700; font-size:3vh; line-height:1.15; border:0.3vh dashed #3a424e; border-radius:4px; margin-top:0.3vh; }
+  #status { position:fixed; right:1vw; bottom:0.5vh; font-size:1.8vh; color:var(--dim); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="top"><div id="title"></div><div id="legend"></div></div>
+  <div id="grid"></div>
+</div>
+<div id="status"></div>
+
+<script>
+// ===== SETTINGS: edit these =====
+var CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQfj4SGI_2QNFdKZ0WxboYQdJ6is_9cqj1POqHiPwJnGO07QKgMphqeDM_42gKHZGzesVXl8p70ZEVu/pub?gid=0&single=true&output=csv";            // paste your Google Sheet "Publish to web" CSV link here (leave empty to see demo data)
+var SCHEDULE_START = "2026-11-01";   // first day of the schedule (Sunday). Before this date the screen shows the first weeks; after it, it follows today.
+var WEEKS_TO_SHOW = 3;       // this week plus the next 2 (3 weeks keeps names readable: 3 presses x 2 shifts = 6 entries a day)
+var HOLIDAYS = [                 // days off: date, label shown in the cell. Anything in the sheet on these days is hidden.
+  ["2026-11-26", "Thanksgiving"],
+  ["2026-11-27", "Black Friday"],
+  ["2026-12-25", "Christmas Day"]
+];
+var REFRESH_MINUTES = 1;     // how often to re-read the sheet
+var PRESS_NAMES = ["EF3", "EF4", "FA26"];
+var PRESS_COLORS = ["#ff7a59", "#8bd450", "#c58bff"];   // one color per press, same order as the names
+// Rotation: 14-day cycle starting on SCHEDULE_START (Sunday). AC = crews A and C work, BD = crews B and D work.
+// Sun Mon Tue Wed Thu Fri Sat, then the next week.
+var PATTERN = ["BD","AC","AC","BD","BD","AC","AC",   // week 1: B/D start Sunday, A/C Mon-Tue, B/D Wed-Thu, A/C Fri-Sat
+               "AC","BD","BD","AC","AC","BD","BD"];  // week 2 flips (A/C Sunday, B/D Mon-Tue, A/C Wed-Thu, B/D Fri-Sat), then repeats
+var CREW_SHIFT = { A:"6A-6P", B:"6A-6P", C:"6P-6A", D:"6P-6A" };   // which shift each crew works
+// Sheet columns (matched loosely): Press | Crew | Staff   (one row per person: 3 presses x 4 crews = 12 rows)
+// Optional swap rows (Start Date, End Date, Press, Staff, Shift) replace the regular person for that press and shift on those days.
+// Leave Staff blank to show OPEN. A swap row with no Shift is added on top of the rotation instead.
+// =================================
+
+var MONTH_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+var DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+var holidays = {}; // "y-m-d" -> label
+var roster = [];   // [{press, crew, staff}]
+var events = {};   // "y-m-d" -> [{press, shift, staff}]
+var lastText = null, pendingText = null;
+
+function key(d) { return d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate(); }
+function esc(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function trim(s) { return (s || "").replace(/^\s+|\s+$/g, ""); }
+
+function parseDate(s) {
+  s = trim(s);
+  var m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (m) { var y = +m[3]; if (y < 100) y += 2000; return new Date(y, +m[1] - 1, +m[2]); }
+  return null;
+}
+
+function parseCSV(text) {
+  var rows = [], row = [], cell = "", q = false, i, c;
+  for (i = 0; i < text.length; i++) {
+    c = text.charAt(i);
+    if (q) {
+      if (c === '"') { if (text.charAt(i + 1) === '"') { cell += '"'; i++; } else q = false; }
+      else cell += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(cell); cell = ""; }
+    else if (c === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; }
+    else if (c !== "\r") cell += c;
+  }
+  if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+
+function buildEvents(rows) {
+  var out = {}, h = rows[0] || [], col = {start:-1, end:-1, press:-1, staff:-1, shift:-1, crew:-1}, i, j;
+  roster = [];
+  for (i = 0; i < h.length; i++) {
+    var n = h[i].toLowerCase();
+    if (n.indexOf("start") > -1 || n === "date") col.start = i;
+    else if (n.indexOf("end") > -1) col.end = i;
+    else if (n.indexOf("press") > -1) col.press = i;
+    else if (n.indexOf("crew") > -1) col.crew = i;
+    else if (n.indexOf("shift") > -1) col.shift = i;
+    else if (n.indexOf("staff") > -1 || n.indexOf("name") > -1 || n.indexOf("operator") > -1) col.staff = i;
+  }
+  for (i = 1; i < rows.length; i++) {
+    var r = rows[i], s = parseDate(r[col.start]);
+    if (!s) {
+      var cm = col.crew > -1 ? trim(r[col.crew]).toUpperCase().match(/\b([ABCD])\b/) : null;
+      if (cm && trim(r[col.press]) && trim(r[col.staff])) roster.push({ press: trim(r[col.press]), crew: cm[1], staff: trim(r[col.staff]) });
+      continue;
+    }
+    var e = col.end > -1 ? parseDate(r[col.end]) : null;
+    if (!e || e < s) e = s;
+    var ev = { press: trim(r[col.press]), shift: col.shift > -1 ? trim(r[col.shift]) : "", staff: trim(r[col.staff]) || "OPEN" };
+    var d = new Date(s.getFullYear(), s.getMonth(), s.getDate());
+    for (j = 0; j < 62 && d <= e; j++) {
+      var k = key(d);
+      (out[k] = out[k] || []).push(ev);
+      d.setDate(d.getDate() + 1);
+    }
+  }
+  return out;
+}
+
+function demoData() {
+  return [["Press","Crew","Staff"],
+    ["EF3","A","Maria"],["EF3","B","Dave"],["EF3","C","Luis"],["EF3","D","Ann"],
+    ["EF4","A","Tina"],["EF4","B","Raj"],["EF4","C","Chris"],["EF4","D","Kim"],
+    ["FA26","A","Pat"],["FA26","B","Jo"],["FA26","C","Sam"],["FA26","D","Lee"]];
+}
+
+// A dated row with a Shift replaces the regular person for that press and shift on those days
+function withSwaps(manual, base) {
+  var out = manual.slice(), i, j, hit;
+  for (i = 0; i < base.length; i++) {
+    hit = false;
+    for (j = 0; j < manual.length; j++) {
+      if (manual[j].shift && pressNum(manual[j].press) === pressNum(base[i].press) && fmtShift(manual[j].shift) === fmtShift(base[i].shift)) { hit = true; break; }
+    }
+    if (!hit) out.push(base[i]);
+  }
+  return out;
+}
+
+function rosterFor(d) {
+  var anchor = parseDate(SCHEDULE_START), out = [], i, c, g;
+  if (!anchor) return out;
+  var n = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - anchor) / 86400000);
+  if (n < 0) return out;
+  g = PATTERN[n % PATTERN.length];
+  for (i = 0; i < roster.length; i++) {
+    c = roster[i].crew;
+    if (g.indexOf(c) > -1) out.push({ press: roster[i].press, shift: CREW_SHIFT[c], staff: roster[i].staff });
+  }
+  return out;
+}
+
+function pressNum(p) {
+  var s = String(p).toLowerCase().replace(/[\s\-]/g, ""), i;
+  for (i = 0; i < PRESS_NAMES.length; i++) if (PRESS_NAMES[i].toLowerCase().replace(/[\s\-]/g, "") === s) return i + 1;
+  if (/^\d+$/.test(s)) return parseInt(s, 10);
+  return 99;
+}
+function colorFor(p) { return PRESS_COLORS[pressNum(p) - 1] || "#cfd5dd"; }
+function pressTag(p) { return PRESS_NAMES[pressNum(p) - 1] || p; }
+
+function renderLegend() {
+  var h = "", i;
+  for (i = 0; i < PRESS_COLORS.length; i++) h += '<div class="key"><i style="background:' + PRESS_COLORS[i] + '"></i>' + esc(PRESS_NAMES[i] || "") + "</div>";
+  document.getElementById("legend").innerHTML = h;
+}
+
+// Shows shifts as 6A-6P / 6P-6A. Sheet entries like "6am-6pm", "6a", or "1st" become 6A-6P; "6pm-6am", "6p", or "2nd" become 6P-6A; anything else shows as typed.
+function fmtShift(s) {
+  if (/^\s*(6\s*a|1st)/i.test(s)) return "6A-6P";
+  if (/^\s*(6\s*p|2nd)/i.test(s)) return "6P-6A";
+  return s;
+}
+
+function loadHolidays() {
+  var i, d;
+  for (i = 0; i < HOLIDAYS.length; i++) { d = parseDate(HOLIDAYS[i][0]); if (d) holidays[key(d)] = HOLIDAYS[i][1]; }
+}
+
+function cmp(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
+
+function render() {
+  var today = new Date(), t0 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  var begin = parseDate(SCHEDULE_START) || t0;
+  var start = new Date((t0 < begin ? begin : t0).getTime());
+  start.setDate(start.getDate() - start.getDay());   // back to Sunday
+  var end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + WEEKS_TO_SHOW * 7 - 1);
+  document.getElementById("title").innerHTML = "24/7 Press Staffing - " + MONTH_SHORT[start.getMonth()] + " " + start.getDate() +
+    " to " + MONTH_SHORT[end.getMonth()] + " " + end.getDate();
+
+  var html = "", i, w;
+  for (i = 0; i < 7; i++) html += '<div class="dow">' + DAYS[i] + "</div>";
+
+  for (w = 0; w < WEEKS_TO_SHOW; w++) {
+    for (i = 0; i < 7; i++) {
+      var d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + w * 7 + i);
+      var cls = "day" + (i === 0 || i === 6 ? " wknd" : "") + (d < t0 ? " past" : "") + (d.getTime() === t0.getTime() ? " today" : "");
+      var label = (d.getDate() === 1 || (w === 0 && i === 0) ? MONTH_SHORT[d.getMonth()] + " " : "") + d.getDate();
+      html += '<div class="' + cls + '"><div class="num">' + label + "</div>";
+      if (holidays[key(d)]) {
+        html += '<div class="hol"><span>' + esc(holidays[key(d)]) + '</span><span>Closed</span></div></div>';
+        continue;
+      }
+      var list = withSwaps(events[key(d)] || [], rosterFor(d)).sort(function (a, b) {
+        return pressNum(a.press) - pressNum(b.press) || cmp(a.shift, b.shift) || cmp(a.staff, b.staff);
+      });
+      var j;
+      for (j = 0; j < list.length; j++) {
+        var parts = [esc(pressTag(list[j].press))];
+        if (list[j].shift) parts.push(esc(fmtShift(list[j].shift)));
+        parts.push(esc(list[j].staff));
+        html += '<div class="ev" style="background:' + colorFor(list[j].press) + '"><span>' + parts.join("&nbsp;-&nbsp;") + "</span></div>";
+      }
+      html += "</div>";
+    }
+  }
+  var g = document.getElementById("grid");
+  g.style.gridTemplateRows = "auto repeat(" + WEEKS_TO_SHOW + ", 1fr)";
+  g.innerHTML = html;
+  fitText();
+}
+
+// Shrinks long entries so they fit on one line (never below 55% of normal size)
+function fitText() {
+  var els = document.getElementById("grid").getElementsByClassName("ev"), i;
+  for (i = 0; i < els.length; i++) {
+    var el = els[i], span = el.firstChild; el.style.fontSize = ""; var cs = window.getComputedStyle(el);
+    var size = parseFloat(cs.fontSize), min = size * 0.55;
+    var avail = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    while (span.offsetWidth > avail && size > min) { size -= 0.5; el.style.fontSize = size + "px"; }
+  }
+}
+window.onresize = fitText;
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitText);
+
+function load() {
+  if (!CSV_URL) { events = buildEvents(demoData()); render(); return; }
+  var x = new XMLHttpRequest();
+  x.open("GET", CSV_URL + (CSV_URL.indexOf("?") > -1 ? "&" : "?") + "t=" + new Date().getTime(), true);
+  x.onreadystatechange = function () {
+    if (x.readyState !== 4) return;
+    if (x.status === 200) {
+      document.getElementById("status").innerHTML = "";
+      var txt = x.responseText;
+      // Google sometimes serves an older copy. Only switch to new data once two fetches in a row agree.
+      if (lastText === null || txt === pendingText) {
+        lastText = txt; pendingText = null;
+        events = buildEvents(parseCSV(txt));
+        render();
+      } else if (txt === lastText) {
+        pendingText = null;
+      } else {
+        pendingText = txt;
+      }
+    } else {
+      document.getElementById("status").innerHTML = "Can’t reach the sheet. Showing last known schedule.";
+    }
+  };
+  x.send();
+}
+
+renderLegend();
+loadHolidays();
+load();
+setInterval(render, 60 * 1000);   // keeps "today" correct past midnight
+setInterval(load, REFRESH_MINUTES * 60 * 1000);
+</script>
+</body>
+</html>
