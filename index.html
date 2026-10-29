@@ -25,11 +25,18 @@
   .day.today { outline:0.5vh solid var(--today); outline-offset:-0.5vh; }
   .num { font-size:2.8vh; font-weight:700; color:var(--dim); line-height:1; margin-bottom:0.3vh; }
   .today .num { color:var(--today); }
-  .ev { flex:1 1 0; min-height:0; max-height:4.4vh; margin-top:0.3vh; padding:0 0.4vw; border-radius:4px;
-    color:#101317; font-weight:700; font-size:3.5vh; line-height:1; display:flex; align-items:center;
-    white-space:nowrap; overflow:hidden; }
-  .ev small { display:inline-block; width:5.6em; font-size:62%; font-weight:500; opacity:0.8; letter-spacing:0.02em; }
+  .ev { flex:1 1 0; min-height:0; max-height:5.6vh; margin-top:0.3vh; padding:0 0.4vw; border-radius:4px;
+    background:#2c3440; border-left:0.7vh solid var(--c); color:var(--text);
+    font-weight:700; font-size:3.4vh; line-height:1; display:flex; align-items:center; white-space:nowrap; overflow:hidden; }
+  .ev small { display:inline-block; width:6.6em; font-size:62%; font-weight:500; color:var(--c); letter-spacing:0.02em; }
   .ev span { flex:none; white-space:nowrap; }
+  .sep { flex:none; display:flex; align-items:center; gap:0.4vw; margin-top:0.5vh; font-size:2vh; font-weight:700;
+    color:var(--dim); line-height:1; letter-spacing:0.14em; }
+  .sep::after { content:""; flex:1; height:0.2vh; background:#3a424e; }
+  .sep.thin { font-size:0; margin-top:0.5vh; }
+  .day.today { background:#2b3444; }
+  .tb { background:#fff; color:#14171c; font-size:1.8vh; padding:0.25vh 0.5vw; border-radius:3px; margin-left:0.5vw;
+    vertical-align:middle; letter-spacing:0.08em; }
   .hol { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
     color:var(--dim); font-weight:700; font-size:3vh; line-height:1.15; border:0.3vh dashed #3a424e; border-radius:4px; margin-top:0.3vh; }
   #status { position:fixed; right:1vw; bottom:0.5vh; font-size:1.8vh; color:var(--dim); }
@@ -47,7 +54,7 @@
 var CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQfj4SGI_2QNFdKZ0WxboYQdJ6is_9cqj1POqHiPwJnGO07QKgMphqeDM_42gKHZGzesVXl8p70ZEVu/pub?gid=0&single=true&output=csv";            // paste your Google Sheet "Publish to web" CSV link here (leave empty to see demo data)
 var SCHEDULE_START = "2026-11-02";   // first working day (Monday). Days before it show as "Off". Before this date the screen shows the first weeks; after it, it follows today.
 var PATTERN_START = "2026-11-01";    // Sunday that day 1 of the rotation below falls on (Nov. 1 is an off day, so the rotation picks up Monday Nov. 2)
-var WEEKS_TO_SHOW = 3;       // this week plus the next 2 (3 weeks keeps names readable: 3 presses x 2 shifts = 6 entries a day)
+var WEEKS_TO_SHOW = 2;       // this week plus the next one (2 weeks keeps names large; 3 presses x 2 shifts = 6 entries a day, plus maintenance on weekends)
 var HOLIDAYS = [                 // days off: date, label shown in the cell. Anything in the sheet on these days is hidden.
   ["2026-11-26", "Thanksgiving"],
   ["2026-11-27", "Black Friday"],
@@ -219,7 +226,7 @@ function render() {
       var d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + w * 7 + i);
       var cls = "day" + (i === 0 || i === 6 ? " wknd" : "") + (d < t0 ? " past" : "") + (d.getTime() === t0.getTime() ? " today" : "");
       var label = (d.getDate() === 1 || (w === 0 && i === 0) ? MONTH_SHORT[d.getMonth()] + " " : "") + d.getDate();
-      html += '<div class="' + cls + '"><div class="num">' + label + "</div>";
+      html += '<div class="' + cls + '"><div class="num">' + label + (d.getTime() === t0.getTime() ? ' <b class="tb">TODAY</b>' : "") + "</div>";
       if (d < begin || holidays[key(d)]) {
         html += '<div class="hol">' + (d < begin ? "<span>Off</span>" : "<span>" + esc(holidays[key(d)]) + "</span><span>Closed</span>") + "</div></div>";
         continue;
@@ -227,17 +234,19 @@ function render() {
       var raw = events[key(d)] || [], reg = [], mt = [], k;
       for (k = 0; k < raw.length; k++) (isMaint(raw[k].press) ? mt : reg).push(raw[k]);
       var list = withSwaps(reg, rosterFor(d)).sort(function (a, b) {
-        return pressNum(a.press) - pressNum(b.press) || cmp(a.shift, b.shift) || cmp(a.staff, b.staff);
+        return cmp(fmtShift(a.shift), fmtShift(b.shift)) || pressNum(a.press) - pressNum(b.press) || cmp(a.staff, b.staff);
       });
       var j;
       for (j = 0; j < list.length; j++) {
+        if (j === 0 || fmtShift(list[j].shift) !== fmtShift(list[j - 1].shift)) { var sh = fmtShift(list[j].shift); html += '<div class="sep">' + (/^6A/.test(sh) ? "DAY" : /^6P/.test(sh) ? "NIGHT" : "") + "</div>"; }
         var tag = esc(pressTag(list[j].press)) + (list[j].shift ? "&nbsp;" + esc(fmtShift(list[j].shift)) : "");
-        html += '<div class="ev" style="background:' + colorFor(list[j].press) + '"><span><small>' + tag + "</small>" + esc(list[j].staff) + "</span></div>";
+        html += '<div class="ev" style="--c:' + colorFor(list[j].press) + '"><span><small>' + tag + "</small>" + esc(list[j].staff) + "</span></div>";
       }
       if (i === 0 || i === 6) {
         if (!mt.length) mt = [{ staff: "OPEN" }];
+        html += '<div class="sep">MAINTENANCE</div>';
         for (j = 0; j < mt.length; j++) {
-          html += '<div class="ev" style="background:' + MAINT_COLOR + '"><span><small>On&nbsp;Call</small>' + esc(mt[j].staff) + "</span></div>";
+          html += '<div class="ev" style="--c:' + MAINT_COLOR + '"><span><small>On&nbsp;Call</small>' + esc(mt[j].staff) + "</span></div>";
         }
       }
       html += "</div>";
